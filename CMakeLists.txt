@@ -36,12 +36,16 @@ function(llama_cpp_python_install_target target)
         # This does not replace explicit installation of dynamic backend
         # targets such as ggml-cpu-*; those are installed as targets below.
         # Automatically handle Windows DLL installation for each target
+        # Only use TARGET_RUNTIME_DLLS for non-static library targets
         if (WIN32)
-            install(
-                FILES $<TARGET_RUNTIME_DLLS:${target}>
-                DESTINATION ${DIR}
-                OPTIONAL # Prevent errors if the target has no DLLs
-            )
+            get_target_property(target_type ${target} TYPE)
+            if(NOT target_type STREQUAL "STATIC_LIBRARY")
+                install(
+                    FILES $<TARGET_RUNTIME_DLLS:${target}>
+                    DESTINATION ${DIR}
+                    OPTIONAL # Prevent errors if the target has no DLLs
+                )
+            endif()
         endif()
     endforeach()
 
