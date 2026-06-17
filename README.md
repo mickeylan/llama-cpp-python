@@ -37,6 +37,7 @@ This package provides:
         - [2. Reranking (Cross-Encoder Scoring)](https://github.com/JamePeng/llama-cpp-python#2-reranking-cross-encoder-scoring)
         - [3. Normalization](https://github.com/JamePeng/llama-cpp-python#3-normalization)
     - [Speculative Decoding](https://github.com/JamePeng/llama-cpp-python#speculative-decoding)
+    - [Multi-Token Prediction (MTP) Models](https://github.com/JamePeng/llama-cpp-python#multi-token-prediction-mtp-models)
 - [FAQ](https://github.com/JamePeng/llama-cpp-python#faq)
 
 The new documentation will be maintained in the [docs/wiki](https://github.com/JamePeng/llama-cpp-python/tree/main/docs/wiki) directory based on the LLM Wiki approach. Interested volunteers are welcome to participate in its maintenance and updates :)
@@ -1786,6 +1787,103 @@ However, it uses a legacy NumPy sliding-window lookup and may have higher overhe
 * Prompt n-gram speculative decoding works best when the current context contains repeated patterns.
 * It is especially useful for code generation, structured text, repeated templates, and boilerplate-heavy completions.
 * `LlamaNGramMapDecoding` stores internal Python-side history and indexes. If you want to reuse the same decoder instance for an unrelated generation, call `draft_model.clear()`.
+
+---
+
+## Multi-Token Prediction (MTP) Models
+
+llama-cpp-python supports models with built-in Multi-Token Prediction (MTP) layers for accelerated inference through speculative decoding. MTP models include dedicated prediction heads that can draft multiple tokens in parallel, providing speed improvements of 1.5-2x in favorable conditions.
+
+### Supported MTP Models
+
+Currently supported MTP architectures include:
+
+- **Qwen3.6-27B-MTP** - Dense model with MTP layers
+- **Qwen3.6-35B-A3B-MTP** - MoE model with MTP layers
+- Other models with `nextn_predict_layers` metadata
+
+### Automatic Detection
+
+MTP support is **automatically detected** from GGUF model metadata. You don't need to manually configure anything:
+
+```python
+from llama_cpp import Llama
+
+# Just load the model - MTP is auto-detected and enabled!
+llm = Llama(
+    model_path="Qwen3.6-27B-MTP.gguf",
+    n_gpu_layers=-1,
+    n_ctx=4096
+)
+# Console output: "Llama.__init__: Auto-detected MTP support, enabling MTP context type"
+
+# Use the model normally
+response = llm.create_chat_completion(
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+### How It Works
+
+When loading a model:
+
+1. **Auto-Detection**: llama-cpp-python reads GGUF metadata and checks for `nextn_predict_layers`
+2. **Context Configuration**: If MTP layers are found, `ctx_type` is automatically set to `LLAMA_CONTEXT_TYPE_MTP`
+3. **Speculative Decoding**: The MTP heads predict draft tokens that are verified by the main model
+
+### Manual Override (Optional)
+
+If you need to manually control MTP behavior:
+
+```python
+from llama_cpp import Llama
+from llama_cpp.llama_cpp import llama_context_type
+
+# Force MTP context type
+llm = Llama(
+    model_path="Qwen3.6-27B-MTP.gguf",
+    ctx_type=llama_context_type.LLAMA_CONTEXT_TYPE_MTP,
+    n_gpu_layers=-1
+)
+
+# Disable MTP (use default context)
+llm_no_mtp = Llama(
+    model_path="Qwen3.6-27B-MTP.gguf",
+    ctx_type=llama_context_type.LLAMA_CONTEXT_TYPE_DEFAULT,
+    n_gpu_layers=-1
+)
+```
+
+### Performance Benefits
+
+MTP-enabled models excel at:
+
+- **Structured outputs**: Code generation, JSON formatting
+- **Repetitive patterns**: Templates, boilerplate text
+- **Long-form generation**: Documentation, articles
+- **Speed improvements**: Up to 2x faster in ideal conditions
+
+### Conversion from HuggingFace
+
+To convert MTP models from HuggingFace to GGUF:
+
+```bash
+cd j:/mickeylan/ai/llama.cpp
+
+# Convert Qwen3.6-27B-MTP
+python convert_hf_to_gguf.py \
+    /path/to/Qwen3.6-27B-MTP \
+    --outfile Qwen3.6-27B-MTP-F16.gguf \
+    --outtype f16
+
+# Convert Qwen3.6-35B-A3B-MTP (MoE)
+python convert_hf_to_gguf.py \
+    /path/to/Qwen3.6-35B-A3B-MTP \
+    --outfile Qwen3.6-35B-A3B-MTP-F16.gguf \
+    --outtype f16
+```
+
+The conversion script automatically detects and preserves MTP layers.
 
 ---
 

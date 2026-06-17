@@ -50,6 +50,13 @@ import llama_cpp.llama_multimodal as llama_multimodal
 from llama_cpp.llama_speculative import LlamaDraftModel
 
 import llama_cpp._internals as internals
+
+# Optional gguf import for MTP detection
+try:
+    import gguf
+    _GGUF_AVAILABLE = True
+except ImportError:
+    _GGUF_AVAILABLE = False
 from ._internals import (
     LlamaSamplingContext,
     LlamaSamplingParams,
@@ -72,6 +79,35 @@ from ._logger import (
     reset_log_filters,
 )
 from ._utils import suppress_stdout_stderr
+
+
+def _detect_mtp_support(model_path: str) -> int:
+    """
+    Auto-detect MTP (Multi-Token Prediction) support from GGUF metadata.
+
+    Returns:
+        0 for LLAMA_CONTEXT_TYPE_DEFAULT (no MTP)
+        1 for LLAMA_CONTEXT_TYPE_MTP (MTP supported)
+    """
+    if not _GGUF_AVAILABLE:
+        return 0
+
+    try:
+        reader = gguf.GGUFReader(model_path)
+        arch = reader.fields.get("general.architecture")
+        if arch is not None:
+            arch_str = str(arch.parts[-1], encoding="utf-8")
+            n_nextn_field = reader.fields.get(f"{arch_str}.nextn_predict_layers")
+            if n_nextn_field is not None:
+                n_nextn = int(n_nextn_field.parts[-1].item())
+                if n_nextn > 0:
+                    reader.close()
+                    return 1  # LLAMA_CONTEXT_TYPE_MTP
+        reader.close()
+    except Exception:
+        pass
+
+    return 0  # LLAMA_CONTEXT_TYPE_DEFAULT
 
 
 class AbortCriteria:
@@ -125,9 +161,7 @@ class Llama:
         n_outputs_max: int = 0,
         n_threads: Optional[int] = None,
         n_threads_batch: Optional[int] = None,
-        ctx_type: Optional[
-            int
-        ] = llama_cpp_lib.llama_context_type.LLAMA_CONTEXT_TYPE_DEFAULT,
+        ctx_type: Optional[int] = None,  # Auto-detect if None
         rope_scaling_type: Optional[
             int
         ] = llama_cpp_lib.llama_rope_scaling_type.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED,
@@ -232,6 +266,9 @@ class Llama:
             n_seq_max: max number of sequences (i.e. distinct states for recurrent models)
             n_threads: Number of threads to use for generation
             n_threads_batch: Number of threads to use for batch processing
+            ctx_type: Context type (0=DEFAULT, 1=MTP). If None, auto-detect from model metadata.
+                Models with MTP (Multi-Token Prediction) layers (e.g., Qwen3.6-27B-MTP, Qwen3.6-35B-A3B-MTP)
+                will automatically use MTP context type for speculative decoding acceleration.
             rope_scaling_type: RoPE scaling type, from `enum llama_rope_scaling_type`. ref: https://github.com/ggml-org/llama.cpp/pull/2054
             pooling_type: Pooling type, from `enum llama_pooling_type`.
             attention_type: attention type to use for embeddings
@@ -505,6 +542,12 @@ class Llama:
         self.context_params.n_outputs_max = self.n_batch if self.n_outputs_max == 0 else self.n_outputs_max
         self.context_params.n_threads = self.n_threads
         self.context_params.n_threads_batch = self.n_threads_batch
+
+        # Auto-detect MTP support if ctx_type is not specified
+        if ctx_type is None:
+            ctx_type = _detect_mtp_support(model_path)
+            if ctx_type == 1 and self.verbose:
+                print(f"Llama.__init__: Auto-detected MTP support, enabling MTP context type")
 
         self.context_params.ctx_type = ctx_type
         self.context_params.ctx_other = None
