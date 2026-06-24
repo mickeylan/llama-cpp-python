@@ -42,7 +42,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.3.1
+        uses: pypa/cibuildwheel@v4.1.0
         env:
           CIBW_REPAIR_WHEEL_COMMAND: ""
           CIBW_ARCHS: "arm64"
